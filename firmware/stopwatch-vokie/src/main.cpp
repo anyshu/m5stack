@@ -4,11 +4,12 @@
 #include <esp_system.h>
 
 #include "assets/vokie_status_images.h"
+#include "smooth_text.h"
 #include "welcome_animation.h"
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1623";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1637";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -95,7 +96,6 @@ String statusLine = "Booting";
 String finalText = "";
 String lastDrawnStatus = "";
 String lastDrawnBatteryLine = "";
-uint8_t lastDrawnStatusSize = 0;
 uint16_t lastDrawnStatusColor = 0;
 uint8_t lastDrawnStatusFrame = 0xff;
 
@@ -211,6 +211,7 @@ String readableStatus() {
   if (statusLine == "Transcribing" || statusLine == "transcribing") return "TRANS";
   if (statusLine == "Recording") return "REC";
   if (statusLine == "Done" || statusLine == "done") return "DONE";
+  if (statusLine == "Ready" || statusLine == "ready") return "READY";
   if (statusLine == "Idle") return "IDLE";
   return statusLine.substring(0, 6);
 }
@@ -300,13 +301,6 @@ void drawStatusImage(const StatusImage image, const uint8_t frame) {
                    datum_t::top_left);
 }
 
-uint8_t statusTextSize(const String& text) {
-  const int width = M5.Display.width();
-  const int chars = max(1, static_cast<int>(text.length()));
-  const int byWidth = max(2, width / (chars * 6));
-  return static_cast<uint8_t>(min(10, byWidth));
-}
-
 void drawUi(bool force = false) {
   const uint32_t now = millis();
   const StatusImage statusImage = statusImageForLine();
@@ -320,12 +314,10 @@ void drawUi(bool force = false) {
   String batteryLine = String("BAT ") + (battery >= 0 ? String(battery) : String("--")) + "%";
   if (M5.Power.isCharging()) batteryLine += "+";
 
-  const uint8_t statusSize = statusTextSize(status);
   const uint16_t statusColor = recording ? RED : GREEN;
   if (!force &&
       status == lastDrawnStatus &&
       batteryLine == lastDrawnBatteryLine &&
-      statusSize == lastDrawnStatusSize &&
       statusColor == lastDrawnStatusColor &&
       statusImage == lastDrawnStatusImage &&
       statusFrame == lastDrawnStatusFrame) {
@@ -340,22 +332,13 @@ void drawUi(bool force = false) {
     drawStatusImage(statusImage, statusFrame);
   } else {
     uiCanvas.fillScreen(BLACK);
-    uiCanvas.setFont(&fonts::Font0);
-    uiCanvas.setTextDatum(middle_center);
-
-    uiCanvas.setTextColor(statusColor, BLACK);
-    uiCanvas.setTextSize(statusSize);
-    uiCanvas.drawString(status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 12);
-
-    uiCanvas.setTextColor(WHITE, BLACK);
-    uiCanvas.setTextSize(3);
-    uiCanvas.drawString(batteryLine, uiCanvas.width() / 2, uiCanvas.height() - 38);
+    drawSmoothCenteredText(uiCanvas, kVokieSmoothStatusFont, status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 10, statusColor);
+    drawSmoothCenteredText(uiCanvas, kVokieSmoothBatteryFont, batteryLine, uiCanvas.width() / 2, uiCanvas.height() - 42, WHITE);
   }
   uiCanvas.pushSprite(0, 0);
 
   lastDrawnStatus = status;
   lastDrawnBatteryLine = batteryLine;
-  lastDrawnStatusSize = statusSize;
   lastDrawnStatusColor = statusColor;
   lastDrawnStatusImage = statusImage;
   lastDrawnStatusFrame = statusFrame;
@@ -704,9 +687,10 @@ void setup() {
   m5gfx::pinMode(GPIO_NUM_1, m5gfx::pin_mode_t::input_pullup);
   m5gfx::pinMode(GPIO_NUM_2, m5gfx::pin_mode_t::input_pullup);
   M5.Display.setRotation(0);
+  M5.Display.setFont(&fonts::FreeSansBold24pt7b);
   M5.Display.setTextDatum(middle_center);
   M5.Display.setTextColor(WHITE, BLACK);
-  M5.Display.setTextSize(8);
+  M5.Display.setTextSize(1.4f);
   M5.Display.fillScreen(BLACK);
   M5.Display.drawString("BOOT", M5.Display.width() / 2, M5.Display.height() / 2);
   uiCanvas.setColorDepth(16);
