@@ -180,8 +180,9 @@ String readableStatus() {
   if (statusLine == "Authenticated") return "OK";
   if (statusLine == "Disconnected") return "DISC";
   if (statusLine == "Not connected") return "NO BLE";
-  if (statusLine == "Transcribing") return "ASR";
+  if (statusLine == "Transcribing") return "TRANS";
   if (statusLine == "Recording") return "REC";
+  if (statusLine == "Done") return "DONE";
   if (statusLine == "Idle") return "IDLE";
   return statusLine.substring(0, 6);
 }
@@ -489,7 +490,7 @@ void handleButtons() {
   if (pendingBlueClickMs > 0 && millis() - pendingBlueClickMs > kBlueDoubleClickMs) {
     pendingBlueClickMs = 0;
     notifyControl(controlButtonJson("blue", "send_enter"));
-    statusLine = "Enter";
+    statusLine = "Send";
     drawUi(true);
   }
 
