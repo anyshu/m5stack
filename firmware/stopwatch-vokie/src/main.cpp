@@ -4,10 +4,11 @@
 #include <esp_system.h>
 
 #include "assets/vokie_status_images.h"
+#include "welcome_animation.h"
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1246";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1623";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -339,6 +340,7 @@ void drawUi(bool force = false) {
     drawStatusImage(statusImage, statusFrame);
   } else {
     uiCanvas.fillScreen(BLACK);
+    uiCanvas.setFont(&fonts::Font0);
     uiCanvas.setTextDatum(middle_center);
 
     uiCanvas.setTextColor(statusColor, BLACK);
@@ -711,6 +713,7 @@ void setup() {
   uiCanvas.createSprite(M5.Display.width(), M5.Display.height());
   uiCanvasReady = true;
   initStatusImageCanvases();
+  playWelcomeAnimation(M5.Display, uiCanvas);
 
   M5.Speaker.end();
 
