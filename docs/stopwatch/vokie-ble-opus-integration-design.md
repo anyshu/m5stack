@@ -1,17 +1,19 @@
-# M5Stack StopWatch BLE Opus 接入 Vokie 设计
+# M5Stack StopWatch BLE ADPCM 接入 Vokie 设计
 
 ## 背景
 
 用户希望将 M5Stack StopWatch 作为 Vokie 专用外设使用。StopWatch 固件可以按 Vokie 需求修改；日常使用优先走蓝牙通讯，有线连接主要用于固件开发、串口日志和调试。选中 StopWatch 外设后，Vokie 的默认麦克风应切换为 StopWatch 上的麦克风，后续 ASR、后处理、历史、粘贴和学习循环继续复用现有 Vokie 管线。
 
-本方案放弃 Wi-Fi 音频链路，第一版直接使用 BLE 控制 + BLE Opus 音频。StopWatch 侧采集 `16kHz / mono / 16-bit PCM`，编码为 `Opus 16kbps` 后通过 BLE GATT 通知发送；Vokie 端接收、排序、解码为 `PCM s16le 16k mono`，再送入现有录音/ASR 后续逻辑。
+本方案放弃 Wi-Fi 音频链路。StopWatch 侧采集 `16kHz / mono / 16-bit PCM`，使用 **IMA ADPCM 4:1 压缩**（或原始 PCM16，按 MTU 自适应）后通过 BLE GATT 通知发送；Vokie 端接收、解码为 `PCM s16le 16k mono`，再送入现有录音/ASR 后续逻辑。
+
+> **最终选型**：经实测，`esp32_opus` 库在 ESP32-S3 上调用 `opus_encode()` 会直接断开 BLE 连接。ADPCM 纯整数运算、零依赖、稳定可靠，320 采样 × 20ms 帧为音质最佳配置。I2S 需使用 Philips 标准格式（`left_align = false`），4D Systems GEN4-ESP32 板默认的左对齐格式会导致采样值整体偏移 1 位产生爆音。
 
 ## 目标
 
 - StopWatch 作为 Vokie 专用 BLE 外设，可被 Vokie 发现、配对、连接和断开。
 - 用户选择 StopWatch 后，Vokie 自动将默认输入切到 StopWatch 虚拟麦克风。
 - StopWatch 通过 BLE 发送按键事件，支持 toggle、PTT 和取消本次录音。
-- StopWatch 通过 BLE 发送 Opus 音频帧，Vokie 解码成 PCM 后进入现有 ASR 管线。
+- StopWatch 通过 BLE 发送 ADPCM 音频帧，Vokie 解码成 PCM 后进入现有 ASR 管线。
 - Vokie 将录音状态、ASR 状态、最终识别文本和错误状态回传给 StopWatch。
 - Vokie 设置页展示 StopWatch 连接状态、电量、麦克风选择状态、音频格式和固件版本。
 - StopWatch 屏幕展示连接状态、电量、录音计时、识别状态和最终识别文本摘要。
@@ -26,7 +28,7 @@
 - 第一版不回传实时 partial ASR 文本，只回传最终文本。
 - 第一版不做多设备同时连接。
 - 第一版不做 OTA 固件升级。
-- 第一版不引入除 Opus 外的音频格式分支。
+- 音频编码优先 ADPCM（4:1），保留 PCM16 fallback，不强制单一格式。
 
 ## 用户体验
 
@@ -69,14 +71,17 @@
 | 采集格式 | PCM s16le |
 | 采样率 | 16000 Hz |
 | 声道 | mono |
-| 编码格式 | Opus |
-| 目标码率 | 16000 bps |
+| 编码格式 | IMA ADPCM (4:1) |
 | 帧长 | 20 ms |
 | 每帧 PCM | 320 samples / 640 bytes |
-| 每帧 Opus | 约 40 bytes，实际以 Opus encoder 输出为准 |
+| 每帧 ADPCM | 160 bytes（压缩后） |
+| 通知总长 | 178 bytes（18 header + 160 payload） |
+| MTU | 512（NimBLE），Vokie 端 Web Bluetooth 自动协商 |
 | Vokie 内部输出 | PCM s16le 16k mono |
 
-固件侧使用 fixed-point Opus encoder。Vokie 端使用 Opus decoder 将帧解码为 PCM，再按现有录音 chunk 形式交给后续管线。
+固件侧使用纯整数 IMA ADPCM 编码（零依赖、零堆分配、`<Arduino.h>` 即可编译）。
+Vokie 端 `stopwatchAudioSource.ts` 内置 ADPCM 解码器，直接输出 PCM 送入现有录音/ASR 管线。
+同时保留 `pcm16` 和 `opus` codec 协议支持，通过 device config 协商切换。
 
 ## BLE GATT 设计
 
@@ -93,7 +98,7 @@ Service UUID: 7b5a0000-766f-6b69-652d-73746f707731
 | 名称 | UUID | 方向 | 用途 |
 | --- | --- | --- | --- |
 | Control | `7b5a0001-766f-6b69-652d-73746f707731` | StopWatch -> Vokie notify | 按键、电量、设备状态 |
-| Audio | `7b5a0002-766f-6b69-652d-73746f707731` | StopWatch -> Vokie notify | Opus 音频帧 |
+| Audio | `7b5a0002-766f-6b69-652d-73746f707731` | StopWatch -> Vokie notify | ADPCM 音频帧 |
 | Status | `7b5a0003-766f-6b69-652d-73746f707731` | Vokie -> StopWatch write | 录音状态、ASR 状态、最终文本、错误 |
 | Config | `7b5a0004-766f-6b69-652d-73746f707731` | Vokie <-> StopWatch read/write | 固件版本、设备能力、音频参数 |
 
@@ -126,7 +131,7 @@ byte 4..7   streamId uint32 little-endian
 byte 8..11  seq uint32 little-endian
 byte 12..15 timestampMs uint32 little-endian
 byte 16..17 payloadLength uint16 little-endian
-byte 18..N  opus payload
+byte 18..N  adpcm payload (160 bytes for 320-sample frame)
 ```
 
 `flags` 第一版定义：
@@ -142,10 +147,10 @@ Vokie 收到 Audio 帧后：
 1. 校验 magic、version、payloadLength。
 2. 按 `streamId` 找到当前音频流。
 3. 按 `seq` 做轻量排序和丢包检测。
-4. 将 Opus payload 送入 decoder。
+4. 将 ADPCM payload 送入解码器输出 PCM。
 5. 输出 PCM chunk 给当前录音会话。
 
-丢包不做重传；实时录音优先。解码器使用 Opus PLC 处理缺帧。
+丢包不做重传；实时录音优先。ADPCM 解码器按帧独立解码，丢帧不累积误差。
 
 ### Status 消息
 
@@ -174,9 +179,9 @@ Vokie 连接后读取设备能力：
 {
   "v":1,
   "device":"m5-stopwatch",
-  "firmware":"0.1.0",
-  "audio":{"codec":"opus","sampleRate":16000,"channels":1,"bitrate":16000,"frameMs":20},
-  "features":["button","battery","display","opus_mic"]
+  "firmware":"0.2.0",
+  "audio":{"codec":"adpcm","sampleRate":16000,"channels":1,"frameMs":20},
+  "features":["button","battery","display","adpcm_mic"]
 }
 ```
 
@@ -201,12 +206,13 @@ src/shared/stopwatch.ts
 
 ### 模块职责
 
-- `protocol.ts`：解析和编码 Control、Audio、Status、Config 协议。
-- `opusDecoder.ts`：封装 Opus 解码，输出 `Int16Array` PCM。
-- `jitterBuffer.ts`：按 `seq` 排序、检测丢包、控制解码节奏。
-- `stopwatchBleService.ts`：BLE 扫描、连接、断开、订阅 notify、写 Status。
-- `stopwatchAudioSource.ts`：实现 Vokie 内部 PCM 音频源接口。
-- `stopwatchDevicePresenter.ts`：向 renderer 暴露连接状态、配对、断开、设备信息。
+- `protocol.ts`：解析和编码 Control、Audio、Status、Config 协议。支持 `opus`/`pcm16`/`adpcm` 三种 audio codec 和 `12`/`15`/`20`/`30`ms 帧长。
+- `stopwatchAudioSource.ts`：实现 Vokie 内部 PCM 音频源接口。内置 IMA ADPCM 解码器（纯整数运算），`pcm16` 模式直接透传。注册 BLE 监听在解码器就绪之前，避免丢帧。
+- `jitterBuffer.ts`：Opus 模式按 `seq` 排序、检测丢包（ADPCM/PCM16 模式不使用 jitter buffer）。
+- `opusDecoder.ts`：封装 Opus WASM 解码（当前未启用，ADPCM 为默认）。
+- `stopwatchBleService.ts`：BLE 连接状态、认证、external connection 接口。
+- `stopwatchDevicePresenter.ts`：向 renderer 暴露连接状态、配对、断开、设备信息；PTT 按键路由到 voiceSessionCoordinator。
+- `stopwatchWebBluetoothBridge.ts`：Web Bluetooth API 封装，renderer 侧订阅 control/audio notify，认证后自动设置 StopWatch 为默认麦克风。
 - `src/shared/stopwatch.ts`：共享类型、虚拟麦克风 id 工具函数、事件 payload。
 
 ### 音频源抽象
@@ -252,8 +258,8 @@ StopWatch
 设备: M5Stack StopWatch
 电量: 86%
 麦克风: 已设为默认输入
-音频: BLE Opus 16kbps, 16kHz mono
-固件: 0.1.0
+音频: BLE ADPCM 16kHz mono
+固件: 0.2.0
 
 [连接设备] [断开] [设为默认麦克风]
 ```
@@ -315,12 +321,10 @@ Error
 ```text
 StopWatch MEMS MIC
   -> PCM s16le 16k mono
-  -> Opus 16kbps encode
+  -> IMA ADPCM encode
   -> BLE Audio notify
   -> Vokie stopwatchBleService
-  -> jitterBuffer
-  -> opusDecoder
-  -> StopWatchBleAudioSource emits PCM
+  -> stopwatchAudioSource (ADPCM decode)
   -> existing recording session
   -> ASR
   -> post process
@@ -334,7 +338,7 @@ StopWatch MEMS MIC
 - 设备能力不匹配：不设为默认输入，提示固件版本或音频参数不支持。
 - 音频帧校验失败：丢弃该帧，记录诊断日志。
 - `seq` 跳号：记录丢包计数，继续解码后续帧。
-- Opus 解码失败：丢弃该帧；连续失败超过阈值时停止本次 StopWatch 音频流并提示。
+- ADPCM 解码失败：丢弃该帧；连续失败超过阈值时停止本次 StopWatch 音频流并提示。
 - 录音中断连：结束当前录音会话并提示外设断开，不自动粘贴不完整文本。
 - Vokie 未授权麦克风权限：仍要求用户授权，因为 StopWatch 音频进入 Vokie 录音能力；权限缺失时不启动录音。
 - StopWatch 电量低：设置页和 StopWatch 屏幕展示低电量状态，不阻断录音。
@@ -344,8 +348,8 @@ StopWatch MEMS MIC
 
 - `protocol.ts` 单元测试：Control JSON 解析、Audio 二进制帧解析、Status 编码、非法版本和长度拒绝。
 - `jitterBuffer.ts` 单元测试：顺序帧、乱序帧、丢帧、重复帧、stream 切换。
-- `opusDecoder.ts` 单元测试：使用固定 Opus fixture 解码为 16k mono PCM。
-- `stopwatchAudioSource.ts` 单元测试：收到 Opus 帧后输出 PCM chunk，stop 后不再输出。
+- `opusDecoder.ts` 单元测试：使用固定 Opus fixture 解码为 16k mono PCM（保留，当前未启用）。
+- `stopwatchAudioSource.ts` 单元测试：收到 ADPCM/PCM16 帧后输出 PCM chunk，stop 后不再输出。
 - `VoiceSessionCoordinator` 单元测试：外部 toggle/PTT/cancel 触发现有录音状态路径。
 - 设置页测试：连接状态、电量、默认麦克风标签展示。
 - 手工联调：真实 StopWatch 固件发送按钮、电量、音频和接收 final_text。
