@@ -21,8 +21,8 @@ constexpr uint32_t kAuthTimeoutMs = 10000;
 constexpr uint32_t kDisconnectRestartDelayMs = 100;
 constexpr int kSampleRate = 16000;
 constexpr int kChannels = 1;
-constexpr int kFrameSamples = 200;  // 12.5ms frames, total 418 bytes fits 509 MTU
-constexpr int kFrameMs = 12;
+constexpr int kFrameSamples = 160;  // 10ms frames
+constexpr int kFrameMs = 10;
 constexpr int kAudioHeaderBytes = 18;
 constexpr size_t kMaxPcmBytes = kFrameSamples * sizeof(int16_t);  // 480 bytes
 
@@ -402,7 +402,7 @@ void setupBle() {
 
   const String config =
       String("{\"v\":1,\"device\":\"m5-stopwatch\",\"firmware\":\"") + kFirmwareVersion +
-      "\",\"audio\":{\"codec\":\"pcm16\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":12},"
+      "\",\"audio\":{\"codec\":\"pcm16\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":10},"
       "\"features\":[\"button\",\"battery\",\"display\",\"pcm_mic\"]}";
   configChar->setValue(config.c_str());
 
@@ -519,6 +519,13 @@ void setup() {
   M5.Display.drawString("BOOT", M5.Display.width() / 2, M5.Display.height() / 2);
 
   M5.Speaker.end();
+
+  M5.Speaker.end();
+
+  auto micCfg = M5.Mic.config();
+  micCfg.magnification = 8;
+  M5.Mic.config(micCfg);
+
   if (!M5.Mic.begin()) {
     Serial.println("[mic] begin failed");
     statusLine = "Mic failed";
