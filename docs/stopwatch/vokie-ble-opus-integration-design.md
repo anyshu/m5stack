@@ -344,6 +344,41 @@ StopWatch MEMS MIC
 - StopWatch 电量低：设置页和 StopWatch 屏幕展示低电量状态，不阻断录音。
 - Status 写入失败：不影响 Vokie 本地 ASR 和粘贴，仅记录诊断。
 
+## 开发复盘
+
+### 选型迭代
+
+| 阶段 | 尝试 | 结果 | 根因 |
+|------|------|------|------|
+| 1 | Opus 编码 (`esp32_opus`) | BLE 连接秒断 | 库调用 `opus_encode()` 在 ESP32-S3 上直接崩 NimBLE |
+| 2 | PCM16 原始 320 采样 | 能连，通知只收 509 字节 | BLE MTU 512 单包上限，浏览器不自动重组分包 |
+| 3 | PCM16 缩小帧 200 采样 | 音质差、爆音 | 帧太小 + I2S 左对齐格式不匹配 |
+| 4 | ADPCM 480 采样 | BLE 连接断 | `pumpAudio()` 局部数组 960 字节栈溢出 |
+| 5 | ADPCM 200-300 采样 | 能用，爆音依旧 | I2S `left_align=true`（左对齐），该板需要 Philips 标准格式 |
+| 6 | Philips I2S（改 M5Unified 库） | 爆音大幅改善 | 格式对了，但增益/帧长还需微调 |
+| 7 | 320 vs 480 采样 AB 对比 | **320 最优** | 480 帧太长导致 I2S 缓冲边界跳跃，"啵啵"声明显 |
+| 8 | 增益 2→4→6→8 梯度测试 | **增益 6 最佳** | RMS ~1085 不削顶，与"好版本"音质对齐 |
+
+### 最终收敛参数
+
+| 参数 | 值 |
+|------|-----|
+| I2S 格式 | Philips 标准（`left_align=false`） |
+| 音频编码 | IMA ADPCM（4:1 纯整数） |
+| 帧采样 | 320 samples / 20ms |
+| 每帧 ADPCM | 160 bytes |
+| 通知总长 | 178 bytes |
+| 麦克风增益 | 6（magnification） |
+| BLE MTU | 512 |
+
+### 遗留问题
+
+1. **帧边界偶发跳跃**（~7.5%）：I2S DMA 缓冲区与 `M5.Mic.record()` 的对齐偏差，软件层面无法彻底消除。ADPCM 解码器按帧独立解码，单帧跳跃不会累积误差。
+
+2. **M5Unified 库文件修改**：`Mic_Class.cpp` 中 `left_align=false` 改动在 `platformio.ini` 的 `lib_deps` 路径下（`.pio/libdeps/`），`pio run -t clean` 会丢失。后续需做成 PlatformIO 编译补丁或 fork 库。
+
+3. **4D Systems GEN4-ESP32 非标板**：该板不是标准 M5Stack，M5Unified 无对应板级定义，麦克风 I2S 引脚靠 Arduino 框架自动检测。若换用标准 M5Stack CoreS3 等板，可移除 Philips 格式修补和左移补偿。
+
 ## 测试
 
 - `protocol.ts` 单元测试：Control JSON 解析、Audio 二进制帧解析、Status 编码、非法版本和长度拒绝。
