@@ -391,6 +391,7 @@ StopWatch MEMS MIC
 - 启动欢迎特效结束后，主界面状态文字和电量文字统一使用电脑端从 `Arial Rounded Bold` 预渲染的 4-bit alpha 圆润字形资源，并由 `smooth_text` 模块按 alpha 混合绘制；不再用 `Font0` 点阵字体或示例 VLW 字体，避免 READY、IDLE、OK、REC、BAT 等后续文字出现马赛克、字体怪异或明显锯齿。
 - UI 不再直接对物理屏幕执行整屏清黑后逐项绘制；改为先绘制到 `M5Canvas` 离屏缓冲，再一次性 `pushSprite(0, 0)` 到屏幕，避免清屏瞬间造成肉眼可见闪烁。
 - 若状态文本、状态字号、状态颜色和电量行均未变化，跳过本次绘制，减少无意义屏幕写入。
+- 主界面常驻空闲态统一为 `Ready`：认证成功、录音停止并进入 ASR、Vokie 回写 `transcribing`/`ASR` 时都保持 `Ready`；`Done`/`OK`、`Send`、`Undo` 只作为 2.5 秒短暂提示，到期后在仍连接且未录音时自动回 `Ready`。
 
 ### 遗留问题
 

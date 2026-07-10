@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1637";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1657";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -24,6 +24,7 @@ constexpr uint32_t kBlueDoubleClickMs = 320;
 constexpr uint32_t kButtonDebounceMs = 20;
 constexpr uint32_t kAuthTimeoutMs = 10000;
 constexpr uint32_t kDisconnectRestartDelayMs = 100;
+constexpr uint32_t kMomentaryStatusMs = 2500;
 constexpr int kSampleRate = 16000;
 constexpr int kChannels = 1;
 constexpr int kFrameSamples = 320;  // 20ms frames — best quality
@@ -74,6 +75,7 @@ uint32_t advertisingUntilMs = 0;
 uint32_t pendingBlueClickMs = 0;
 uint32_t connectedAtMs = 0;
 uint32_t disconnectAtMs = 0;
+uint32_t returnReadyAtMs = 0;
 bool pendingRestartAdvertising = false;
 uint32_t streamId = 1;
 uint32_t audioSeq = 1;
@@ -131,6 +133,26 @@ bool readYellowPressed() {
 
 bool readBluePressed() {
   return !m5gfx::gpio_in(GPIO_NUM_1);
+}
+
+void clearReadyTimer() {
+  returnReadyAtMs = 0;
+}
+
+void setStatus(const String& status) {
+  statusLine = status;
+  clearReadyTimer();
+}
+
+void showMomentaryStatus(const String& status, const uint32_t now) {
+  statusLine = status;
+  returnReadyAtMs = now + kMomentaryStatusMs;
+}
+
+String normalizeRemoteState(const String& state) {
+  if (state == "Transcribing" || state == "transcribing" || state == "ASR" || state == "asr") return "Ready";
+  if (state == "Done" || state == "done") return "Done";
+  return state;
 }
 
 void updateButton(DebouncedButton& button, const bool rawPressed, const uint32_t now) {
@@ -362,7 +384,7 @@ void startAdvertisingWindow() {
   authenticated = false;
   advertising = true;
   advertisingUntilMs = 0;
-  statusLine = "Pairing";
+  setStatus("Pairing");
   NimBLEDevice::startAdvertising();
   Serial.println("[ble] advertising started");
   drawUi(true);
@@ -389,7 +411,7 @@ void forceDisconnectAndRestart() {
   authenticated = false;
   recording = false;
   pendingRestartAdvertising = false;
-  statusLine = "Pairing";
+  setStatus("Pairing");
   drawUi(true);
 
   startAdvertisingWindow();
@@ -431,7 +453,7 @@ void sendAudioPacket(const uint8_t flags, const uint8_t* payload, const int payl
 void startRecording() {
   if (recording) return;
   if (!connected || !authenticated) {
-    statusLine = "Not connected";
+    setStatus("Not connected");
     Serial.printf("[record] ignored: connected=%d authenticated=%d\n", connected, authenticated);
     drawUi(true);
     return;
@@ -448,7 +470,7 @@ void startRecording() {
   finalText = "";
   adpcm.prev = 0;
   adpcm.idx = 0;
-  statusLine = "Recording";
+  setStatus("Recording");
   while (M5.Mic.isRecording()) M5.delay(1);
   Serial.printf("[record] start stream=%lu yellowRaw=%d blueRaw=%d\n",
                 static_cast<unsigned long>(streamId),
@@ -464,7 +486,7 @@ void stopRecording() {
   recording = false;
   notifyControl(controlButtonJson("yellow", "ptt_up"));
   sendAudioPacket(0x02, nullptr, 0);
-  statusLine = "Transcribing";
+  setStatus("Ready");
   Serial.printf("[record] stop frames=%lu pcmBytes=%lu micMiss=%lu\n",
                 static_cast<unsigned long>(audioFrameCount),
                 static_cast<unsigned long>(audioBytesSent),
@@ -500,7 +522,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     advertising = false;
     pendingRestartAdvertising = false;
     connectedAtMs = millis();
-    statusLine = "BLE connected";
+    setStatus("BLE connected");
     Serial.println("[ble] connected");
     drawUi(true);
   }
@@ -512,7 +534,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     recording = false;
     disconnectAtMs = millis();
     pendingRestartAdvertising = true;
-    statusLine = "Disconnected";
+    setStatus("Disconnected");
     Serial.printf("[ble] disconnected reason=%d wasRecording=%d\n", reason, wasRecording);
     drawUi(true);
   }
@@ -525,7 +547,7 @@ class AuthCallbacks : public NimBLECharacteristicCallbacks {
     const String response = nonce.length() > 0 ? nonce : body;
     characteristic->setValue(response.c_str());
     authenticated = response.length() > 0;
-    statusLine = authenticated ? "Authenticated" : "Auth failed";
+    setStatus(authenticated ? "Ready" : "Auth failed");
     Serial.printf("[auth] challenge=%s response=%s\n", body.c_str(), response.c_str());
     drawUi(true);
   }
@@ -537,9 +559,11 @@ class StatusCallbacks : public NimBLECharacteristicCallbacks {
     const String type = extractJsonString(body, "type");
     if (type == "final_text") {
       finalText = extractJsonString(body, "text");
-      statusLine = "Done";
+      showMomentaryStatus("Done", millis());
     } else if (type == "state") {
-      statusLine = extractJsonString(body, "state");
+      const String state = normalizeRemoteState(extractJsonString(body, "state"));
+      if (state == "Done") showMomentaryStatus(state, millis());
+      else setStatus(state);
     } else if (type == "display_style") {
       const String style = extractJsonString(body, "style");
       if (setDisplayStyle(style)) {
@@ -548,7 +572,7 @@ class StatusCallbacks : public NimBLECharacteristicCallbacks {
         Serial.printf("[display] ignored unknown style=%s\n", style.c_str());
       }
     } else if (type == "error") {
-      statusLine = extractJsonString(body, "message");
+      setStatus(extractJsonString(body, "message"));
     }
     Serial.printf("[status] %s\n", body.c_str());
     drawUi(true);
@@ -618,7 +642,7 @@ void handleButtons() {
     if (pendingBlueClickMs > 0 && now - pendingBlueClickMs <= kBlueDoubleClickMs) {
       pendingBlueClickMs = 0;
       notifyControl(controlButtonJson("blue", "undo_last_output"));
-      statusLine = "Undo";
+      showMomentaryStatus("Undo", now);
       drawUi(true);
     } else {
       pendingBlueClickMs = now;
@@ -627,7 +651,7 @@ void handleButtons() {
   if (pendingBlueClickMs > 0 && millis() - pendingBlueClickMs > kBlueDoubleClickMs) {
     pendingBlueClickMs = 0;
     notifyControl(controlButtonJson("blue", "send_enter"));
-    statusLine = "Send";
+    showMomentaryStatus("Send", millis());
     drawUi(true);
   }
 
@@ -639,6 +663,17 @@ void handleButtons() {
   if (M5.BtnPWR.wasHold()) {
     Serial.println("[button] red hold -> force restart advertising");
     forceDisconnectAndRestart();
+  }
+}
+
+void tickMomentaryStatus() {
+  if (returnReadyAtMs == 0) return;
+  const uint32_t now = millis();
+  if (static_cast<int32_t>(now - returnReadyAtMs) < 0) return;
+  returnReadyAtMs = 0;
+  if (connected && authenticated && !recording) {
+    statusLine = "Ready";
+    drawUi(true);
   }
 }
 
@@ -709,7 +744,7 @@ void setup() {
 
   if (!M5.Mic.begin()) {
     Serial.println("[mic] begin failed");
-    statusLine = "Mic failed";
+    setStatus("Mic failed");
   } else {
     Serial.println("[mic] ready");
   }
@@ -724,6 +759,7 @@ void loop() {
   pumpAudio();
   tickAuthTimeout();
   tickPendingRestart();
+  tickMomentaryStatus();
   tickBattery();
   tickAdvertisingWindow();
   drawUi();

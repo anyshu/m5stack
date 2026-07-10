@@ -1,5 +1,13 @@
 # Stopwatch Vokie Firmware Changelog
 
+## 0.2.1-test.20260710.1657 - 2026-07-10 16:57
+
+- 记录类型：测试版本。
+- 修改内容：修复启动后主界面状态回落：认证成功常驻 `Ready`，录音停止并进入 ASR 后回到 `Ready`；Vokie 回写 `transcribing`/`ASR` 状态时保持 `Ready`；`Done`/`OK`、`Send`、`Undo` 改为 2.5 秒短暂提示后自动回 `Ready`；更新固件版本号为 `0.2.1-test.20260710.1657`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem112201`。
+- 测试结论：已通过 `pio run` 编译验证，并已完成真机烧录；待目视确认录音/ASR、Send、Undo 状态回落到 Ready。
+- 对应 commit：本次提交。
+
 ## 0.2.1-test.20260710.1637 - 2026-07-10 16:37
 
 - 记录类型：测试版本。
