@@ -81,9 +81,15 @@ uint32_t lastAudioLogMs = 0;
 uint32_t lastAudioFrameMs = 0;
 
 int16_t pcmFrame[kFrameSamples];
+M5Canvas uiCanvas(&M5.Display);
+bool uiCanvasReady = false;
 
 String statusLine = "Booting";
 String finalText = "";
+String lastDrawnStatus = "";
+String lastDrawnBatteryLine = "";
+uint8_t lastDrawnStatusSize = 0;
+uint16_t lastDrawnStatusColor = 0;
 
 struct DebouncedButton {
   bool initialized = false;
@@ -200,19 +206,40 @@ void drawUi(bool force = false) {
   lastUiMs = now;
 
   const String status = readableStatus();
-  M5.Display.fillScreen(BLACK);
-  M5.Display.setTextDatum(middle_center);
-
-  M5.Display.setTextColor(recording ? RED : GREEN, BLACK);
-  M5.Display.setTextSize(statusTextSize(status));
-  M5.Display.drawString(status, M5.Display.width() / 2, M5.Display.height() / 2 - 12);
-
   const int battery = M5.Power.getBatteryLevel();
   String batteryLine = String("BAT ") + (battery >= 0 ? String(battery) : String("--")) + "%";
   if (M5.Power.isCharging()) batteryLine += "+";
-  M5.Display.setTextColor(WHITE, BLACK);
-  M5.Display.setTextSize(3);
-  M5.Display.drawString(batteryLine, M5.Display.width() / 2, M5.Display.height() - 38);
+
+  const uint8_t statusSize = statusTextSize(status);
+  const uint16_t statusColor = recording ? RED : GREEN;
+  if (!force &&
+      status == lastDrawnStatus &&
+      batteryLine == lastDrawnBatteryLine &&
+      statusSize == lastDrawnStatusSize &&
+      statusColor == lastDrawnStatusColor) {
+    return;
+  }
+
+  if (!uiCanvasReady) return;
+
+  // Draw into an offscreen canvas and push the complete frame once to avoid
+  // visible black-frame flicker from clearing the physical display directly.
+  uiCanvas.fillScreen(BLACK);
+  uiCanvas.setTextDatum(middle_center);
+
+  uiCanvas.setTextColor(statusColor, BLACK);
+  uiCanvas.setTextSize(statusSize);
+  uiCanvas.drawString(status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 12);
+
+  uiCanvas.setTextColor(WHITE, BLACK);
+  uiCanvas.setTextSize(3);
+  uiCanvas.drawString(batteryLine, uiCanvas.width() / 2, uiCanvas.height() - 38);
+  uiCanvas.pushSprite(0, 0);
+
+  lastDrawnStatus = status;
+  lastDrawnBatteryLine = batteryLine;
+  lastDrawnStatusSize = statusSize;
+  lastDrawnStatusColor = statusColor;
 }
 
 void startAdvertisingWindow() {
@@ -554,6 +581,9 @@ void setup() {
   M5.Display.setTextSize(8);
   M5.Display.fillScreen(BLACK);
   M5.Display.drawString("BOOT", M5.Display.width() / 2, M5.Display.height() / 2);
+  uiCanvas.setColorDepth(16);
+  uiCanvas.createSprite(M5.Display.width(), M5.Display.height());
+  uiCanvasReady = true;
 
   M5.Speaker.end();
 
