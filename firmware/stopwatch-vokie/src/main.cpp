@@ -21,10 +21,38 @@ constexpr uint32_t kAuthTimeoutMs = 10000;
 constexpr uint32_t kDisconnectRestartDelayMs = 100;
 constexpr int kSampleRate = 16000;
 constexpr int kChannels = 1;
-constexpr int kFrameSamples = 240;  // 15ms, 498 bytes < 509 MTU
-constexpr int kFrameMs = 15;
+constexpr int kFrameSamples = 320;  // 20ms frames — best quality
+constexpr int kFrameMs = 20;
 constexpr int kAudioHeaderBytes = 18;
-constexpr size_t kMaxPcmBytes = kFrameSamples * sizeof(int16_t);  // 480 bytes
+constexpr size_t kMaxAdpcmBytes = (kFrameSamples + 1) / 2;  // 160 bytes
+
+// IMA ADPCM encoder
+struct AdpcmState { int16_t prev = 0; int idx = 0; };
+AdpcmState adpcm;
+uint8_t adpcmBuf[kMaxAdpcmBytes];
+uint8_t audioPacket[kAudioHeaderBytes + kMaxAdpcmBytes];
+
+static constexpr int kStepTable[89] = {
+  7,8,9,10,11,12,13,14,16,17,19,21,23,25,28,31,34,37,41,45,50,55,60,66,
+  73,80,88,97,107,118,130,143,157,173,190,209,230,253,279,307,337,371,408,
+  449,494,544,598,658,724,796,876,963,1060,1166,1282,1411,1552,1707,1878,
+  2066,2272,2499,2749,3024,3327,3660,4026,4428,4871,5358,5894,6484,7132,
+  7845,8630,9493,10442,11487,12635,13899,15289,16818,18500,20350,22385,
+  24623,27086,29794,32767
+};
+static constexpr int kIdxTable[16] = {-1,-1,-1,-1,2,4,6,8,-1,-1,-1,-1,2,4,6,8};
+
+uint8_t encodeAdpcm(int16_t s) {
+  int d = (int)s - (int)adpcm.prev; uint8_t n = 0;
+  if (d < 0) { n = 8; d = -d; }
+  int st = kStepTable[adpcm.idx], dt = st >> 3;
+  if (d >= st) { n |= 4; d -= st; dt += st; }
+  st >>= 1; if (d >= st) { n |= 2; d -= st; dt += st; }
+  st >>= 1; if (d >= st) { n |= 1; dt += st; }
+  adpcm.prev = constrain((int)adpcm.prev + ((n & 8) ? -dt : dt), -32768, 32767);
+  adpcm.idx = constrain(adpcm.idx + kIdxTable[n], 0, 88);
+  return n;
+}
 
 NimBLEServer* server = nullptr;
 NimBLECharacteristic* controlChar = nullptr;
@@ -53,7 +81,6 @@ uint32_t lastAudioLogMs = 0;
 uint32_t lastAudioFrameMs = 0;
 
 int16_t pcmFrame[kFrameSamples];
-uint8_t audioPacket[kAudioHeaderBytes + kMaxPcmBytes];
 
 String statusLine = "Booting";
 String finalText = "";
@@ -240,7 +267,7 @@ void forceDisconnectAndRestart() {
 
 void sendAudioPacket(const uint8_t flags, const uint8_t* payload, const int payloadLen) {
   if (!connected || !authenticated || audioChar == nullptr) return;
-  if (payloadLen < 0 || payloadLen > static_cast<int>(kMaxPcmBytes)) return;
+  if (payloadLen < 0 || payloadLen > static_cast<int>(kMaxAdpcmBytes)) return;
 
   audioPacket[0] = 0x56;  // 'V'
   audioPacket[1] = 0x4f;  // 'O'
@@ -289,6 +316,8 @@ void startRecording() {
   lastAudioLogMs = 0;
   lastAudioFrameMs = 0;
   finalText = "";
+  adpcm.prev = 0;
+  adpcm.idx = 0;
   statusLine = "Recording";
   while (M5.Mic.isRecording()) M5.delay(1);
   Serial.printf("[record] start stream=%lu yellowRaw=%d blueRaw=%d\n",
@@ -324,14 +353,15 @@ void pumpAudio() {
     memset(pcmFrame, 0, sizeof(pcmFrame));
   }
 
-  // Compensate for left-aligned I2S: shift samples left by 1 bit
+  // ADPCM encode
   for (int i = 0; i < kFrameSamples; ++i) {
-    int32_t val = static_cast<int32_t>(pcmFrame[i]) << 1;
-    pcmFrame[i] = static_cast<int16_t>(constrain(val, -32768L, 32767L));
+    uint8_t nib = encodeAdpcm(pcmFrame[i]);
+    if (i & 1) adpcmBuf[i >> 1] |= (nib << 4);
+    else      adpcmBuf[i >> 1] = nib & 0x0f;
   }
 
-  const int pcmBytes = kFrameSamples * static_cast<int>(sizeof(int16_t));
-  sendAudioPacket(audioSeq == 1 ? 0x01 : 0x00, reinterpret_cast<const uint8_t*>(pcmFrame), pcmBytes);
+  const int bytes = static_cast<int>(kMaxAdpcmBytes);
+  sendAudioPacket(audioSeq == 1 ? 0x01 : 0x00, adpcmBuf, bytes);
 }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -408,7 +438,7 @@ void setupBle() {
 
   const String config =
       String("{\"v\":1,\"device\":\"m5-stopwatch\",\"firmware\":\"") + kFirmwareVersion +
-      "\",\"audio\":{\"codec\":\"pcm16\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":15},"
+      "\",\"audio\":{\"codec\":\"adpcm\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":20},"
       "\"features\":[\"button\",\"battery\",\"display\",\"pcm_mic\"]}";
   configChar->setValue(config.c_str());
 
@@ -529,7 +559,7 @@ void setup() {
   M5.Speaker.end();
 
   auto micCfg = M5.Mic.config();
-  micCfg.magnification = 4;  // Low: software left-shift provides 2x gain
+  micCfg.magnification = 6;  // Match "good" version RMS ~1085
   M5.Mic.config(micCfg);
 
   if (!M5.Mic.begin()) {
