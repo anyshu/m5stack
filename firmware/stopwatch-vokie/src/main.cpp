@@ -1,10 +1,13 @@
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <NimBLEDevice.h>
+#include <esp_system.h>
+
+#include "assets/vokie_status_images.h"
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.0-vokie-pcm";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1246";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -82,7 +85,10 @@ uint32_t lastAudioFrameMs = 0;
 
 int16_t pcmFrame[kFrameSamples];
 M5Canvas uiCanvas(&M5.Display);
+M5Canvas thinkingImageCanvas(&M5.Display);
+M5Canvas okImageCanvas(&M5.Display);
 bool uiCanvasReady = false;
+bool statusImageCanvasesReady = false;
 
 String statusLine = "Booting";
 String finalText = "";
@@ -90,6 +96,21 @@ String lastDrawnStatus = "";
 String lastDrawnBatteryLine = "";
 uint8_t lastDrawnStatusSize = 0;
 uint16_t lastDrawnStatusColor = 0;
+uint8_t lastDrawnStatusFrame = 0xff;
+
+enum class StatusImage : uint8_t {
+  none,
+  transcribing,
+  done,
+};
+
+enum class DisplayStyle : uint8_t {
+  text,
+  sticker,
+};
+
+StatusImage lastDrawnStatusImage = StatusImage::none;
+DisplayStyle displayStyle = DisplayStyle::sticker;
 
 struct DebouncedButton {
   bool initialized = false;
@@ -186,11 +207,96 @@ String readableStatus() {
   if (statusLine == "Authenticated") return "OK";
   if (statusLine == "Disconnected") return "DISC";
   if (statusLine == "Not connected") return "NO BLE";
-  if (statusLine == "Transcribing") return "TRANS";
+  if (statusLine == "Transcribing" || statusLine == "transcribing") return "TRANS";
   if (statusLine == "Recording") return "REC";
-  if (statusLine == "Done") return "DONE";
+  if (statusLine == "Done" || statusLine == "done") return "DONE";
   if (statusLine == "Idle") return "IDLE";
   return statusLine.substring(0, 6);
+}
+
+StatusImage statusImageForLine() {
+  if (displayStyle != DisplayStyle::sticker) return StatusImage::none;
+  if (recording) return StatusImage::none;
+  if (statusLine == "Transcribing" || statusLine == "transcribing") return StatusImage::transcribing;
+  if (statusLine == "Done" || statusLine == "done") return StatusImage::done;
+  return StatusImage::none;
+}
+
+bool setDisplayStyle(const String& style) {
+  if (style == "text") {
+    displayStyle = DisplayStyle::text;
+    return true;
+  }
+  if (style == "sticker") {
+    displayStyle = DisplayStyle::sticker;
+    return true;
+  }
+  return false;
+}
+
+uint8_t statusAnimationFrame(const StatusImage image, const uint32_t now) {
+  if (image == StatusImage::none) return 0;
+  constexpr uint32_t kFrameMs = 180;
+  constexpr uint8_t kFrameCount = 6;
+  return static_cast<uint8_t>((now / kFrameMs) % kFrameCount);
+}
+
+void initStatusImageCanvases() {
+  thinkingImageCanvas.setColorDepth(16);
+  okImageCanvas.setColorDepth(16);
+  thinkingImageCanvas.createSprite(static_cast<int32_t>(kVokieStatusImageSourceSize),
+                                   static_cast<int32_t>(kVokieStatusImageSourceSize));
+  okImageCanvas.createSprite(static_cast<int32_t>(kVokieStatusImageSourceSize),
+                             static_cast<int32_t>(kVokieStatusImageSourceSize));
+  thinkingImageCanvas.fillScreen(WHITE);
+  okImageCanvas.fillScreen(WHITE);
+  thinkingImageCanvas.drawPng(kVokieThinkingPng, kVokieThinkingPngLen, 0, 0);
+  okImageCanvas.drawPng(kVokieOkPng, kVokieOkPngLen, 0, 0);
+  statusImageCanvasesReady = true;
+}
+
+void drawStatusImage(const StatusImage image, const uint8_t frame) {
+  const uint8_t* png = image == StatusImage::transcribing ? kVokieThinkingPng : kVokieOkPng;
+  const size_t pngLen = image == StatusImage::transcribing ? kVokieThinkingPngLen : kVokieOkPngLen;
+  static constexpr int8_t kThinkingYOffsets[] = {0, -2, -4, -2, 0, 2};
+  static constexpr float kThinkingScales[] = {0.95f, 0.96f, 0.98f, 0.96f, 0.95f, 0.96f};
+  static constexpr int8_t kDoneYOffsets[] = {2, -3, -5, -2, 0, 1};
+  static constexpr float kDoneScales[] = {0.90f, 0.96f, 0.98f, 0.95f, 0.96f, 0.94f};
+  constexpr float kSourceImageSize = kVokieStatusImageSourceSize;
+  // Stopwatch uses a round display: fit square artwork inside the circular safe area.
+  constexpr float kScreenSafeFill = 0.62f;
+  const float scaleX = static_cast<float>(uiCanvas.width()) / kSourceImageSize;
+  const float scaleY = static_cast<float>(uiCanvas.height()) / kSourceImageSize;
+  const float baseScale = (scaleX < scaleY ? scaleX : scaleY) * kScreenSafeFill;
+  const float motionScale = image == StatusImage::transcribing ? kThinkingScales[frame] : kDoneScales[frame];
+  const int8_t yOffset = image == StatusImage::transcribing ? kThinkingYOffsets[frame] : kDoneYOffsets[frame];
+  const float scale = baseScale * motionScale;
+  const int32_t imageSize = static_cast<int32_t>(kSourceImageSize * scale + 0.5f);
+  const int32_t imageX = (uiCanvas.width() - imageSize) / 2;
+  const int32_t imageY = (uiCanvas.height() - imageSize) / 2 + yOffset;
+
+  uiCanvas.fillScreen(WHITE);
+  if (statusImageCanvasesReady) {
+    M5Canvas* imageCanvas = image == StatusImage::transcribing ? &thinkingImageCanvas : &okImageCanvas;
+    imageCanvas->pushRotateZoom(&uiCanvas,
+                                uiCanvas.width() / 2,
+                                uiCanvas.height() / 2 + yOffset,
+                                0.0f,
+                                scale,
+                                scale);
+    return;
+  }
+
+  uiCanvas.drawPng(png, pngLen,
+                   imageX,
+                   imageY,
+                   imageSize,
+                   imageSize,
+                   0,
+                   0,
+                   scale,
+                   scale,
+                   datum_t::top_left);
 }
 
 uint8_t statusTextSize(const String& text) {
@@ -202,10 +308,13 @@ uint8_t statusTextSize(const String& text) {
 
 void drawUi(bool force = false) {
   const uint32_t now = millis();
-  if (!force && now - lastUiMs < 250) return;
+  const StatusImage statusImage = statusImageForLine();
+  const uint32_t refreshMs = statusImage == StatusImage::none ? 250 : 90;
+  if (!force && now - lastUiMs < refreshMs) return;
   lastUiMs = now;
 
   const String status = readableStatus();
+  const uint8_t statusFrame = statusAnimationFrame(statusImage, now);
   const int battery = M5.Power.getBatteryLevel();
   String batteryLine = String("BAT ") + (battery >= 0 ? String(battery) : String("--")) + "%";
   if (M5.Power.isCharging()) batteryLine += "+";
@@ -216,7 +325,9 @@ void drawUi(bool force = false) {
       status == lastDrawnStatus &&
       batteryLine == lastDrawnBatteryLine &&
       statusSize == lastDrawnStatusSize &&
-      statusColor == lastDrawnStatusColor) {
+      statusColor == lastDrawnStatusColor &&
+      statusImage == lastDrawnStatusImage &&
+      statusFrame == lastDrawnStatusFrame) {
     return;
   }
 
@@ -224,22 +335,28 @@ void drawUi(bool force = false) {
 
   // Draw into an offscreen canvas and push the complete frame once to avoid
   // visible black-frame flicker from clearing the physical display directly.
-  uiCanvas.fillScreen(BLACK);
-  uiCanvas.setTextDatum(middle_center);
+  if (statusImage != StatusImage::none) {
+    drawStatusImage(statusImage, statusFrame);
+  } else {
+    uiCanvas.fillScreen(BLACK);
+    uiCanvas.setTextDatum(middle_center);
 
-  uiCanvas.setTextColor(statusColor, BLACK);
-  uiCanvas.setTextSize(statusSize);
-  uiCanvas.drawString(status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 12);
+    uiCanvas.setTextColor(statusColor, BLACK);
+    uiCanvas.setTextSize(statusSize);
+    uiCanvas.drawString(status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 12);
 
-  uiCanvas.setTextColor(WHITE, BLACK);
-  uiCanvas.setTextSize(3);
-  uiCanvas.drawString(batteryLine, uiCanvas.width() / 2, uiCanvas.height() - 38);
+    uiCanvas.setTextColor(WHITE, BLACK);
+    uiCanvas.setTextSize(3);
+    uiCanvas.drawString(batteryLine, uiCanvas.width() / 2, uiCanvas.height() - 38);
+  }
   uiCanvas.pushSprite(0, 0);
 
   lastDrawnStatus = status;
   lastDrawnBatteryLine = batteryLine;
   lastDrawnStatusSize = statusSize;
   lastDrawnStatusColor = statusColor;
+  lastDrawnStatusImage = statusImage;
+  lastDrawnStatusFrame = statusFrame;
 }
 
 void startAdvertisingWindow() {
@@ -438,6 +555,13 @@ class StatusCallbacks : public NimBLECharacteristicCallbacks {
       statusLine = "Done";
     } else if (type == "state") {
       statusLine = extractJsonString(body, "state");
+    } else if (type == "display_style") {
+      const String style = extractJsonString(body, "style");
+      if (setDisplayStyle(style)) {
+        Serial.printf("[display] style=%s\n", style.c_str());
+      } else {
+        Serial.printf("[display] ignored unknown style=%s\n", style.c_str());
+      }
     } else if (type == "error") {
       statusLine = extractJsonString(body, "message");
     }
@@ -467,7 +591,8 @@ void setupBle() {
   const String config =
       String("{\"v\":1,\"device\":\"m5-stopwatch\",\"firmware\":\"") + kFirmwareVersion +
       "\",\"audio\":{\"codec\":\"adpcm\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":20},"
-      "\"features\":[\"button\",\"battery\",\"display\",\"pcm_mic\"]}";
+      "\"display\":{\"styles\":[\"text\",\"sticker\"],\"defaultStyle\":\"sticker\"},"
+      "\"features\":[\"button\",\"battery\",\"display\",\"display_style\",\"pcm_mic\"]}";
   configChar->setValue(config.c_str());
 
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
@@ -570,6 +695,7 @@ void tickBattery() {
 void setup() {
   Serial.begin(115200);
   delay(300);
+  Serial.printf("[boot] firmware=%s reset_reason=%d\n", kFirmwareVersion, static_cast<int>(esp_reset_reason()));
 
   auto cfg = M5.config();
   M5.begin(cfg);
@@ -584,6 +710,7 @@ void setup() {
   uiCanvas.setColorDepth(16);
   uiCanvas.createSprite(M5.Display.width(), M5.Display.height());
   uiCanvasReady = true;
+  initStatusImageCanvases();
 
   M5.Speaker.end();
 

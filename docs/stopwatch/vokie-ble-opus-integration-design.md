@@ -161,6 +161,8 @@ Status 使用 UTF-8 JSON。Vokie 写入 StopWatch。
 {"v":1,"type":"state","state":"recording","mode":"toggle","elapsedMs":12000}
 {"v":1,"type":"state","state":"transcribing"}
 {"v":1,"type":"final_text","text":"今天我们讨论一下项目进度。"}
+{"v":1,"type":"display_style","style":"sticker"}
+{"v":1,"type":"display_style","style":"text"}
 {"v":1,"type":"error","code":"asr_failed","message":"识别失败"}
 ```
 
@@ -170,6 +172,7 @@ Status 使用 UTF-8 JSON。Vokie 写入 StopWatch。
 - 单条 `final_text.text` 最多 120 个 UTF-8 字符。
 - 超出部分由 Vokie 截断并追加省略号。
 - StopWatch 不参与文本编辑，不修改 Vokie 识别结果。
+- `display_style.style` 支持 `text` 和 `sticker`。`text` 使用纯文字状态显示；`sticker` 使用表情图动效显示。
 
 ### Config
 
@@ -181,7 +184,8 @@ Vokie 连接后读取设备能力：
   "device":"m5-stopwatch",
   "firmware":"0.2.0",
   "audio":{"codec":"adpcm","sampleRate":16000,"channels":1,"frameMs":20},
-  "features":["button","battery","display","adpcm_mic"]
+  "display":{"styles":["text","sticker"],"defaultStyle":"sticker"},
+  "features":["button","battery","display","display_style","adpcm_mic"]
 }
 ```
 
@@ -297,16 +301,17 @@ Recording 00:12
 
 ```text
 Vokie
-Transcribing...
+[让我想想 240x240 表情图]
 ```
 
 完成：
 
 ```text
 Vokie
-Done
-今天我们讨论一下...
+[OK 240x240 表情图]
 ```
+
+StopWatch 固件支持两种显示风格：`text` 纯文字风格和 `sticker` 表情动效风格。`sticker` 风格在 `Transcribing` / `transcribing` 状态下使用“让我想想”表情图替代文字提示，并以轻微呼吸/上下浮动形成识别中动效；在 `Done` / `done` 状态下使用 `OK` 表情图替代文字提示，并以短弹跳循环形成完成动效。StopWatch 为 466x466 圆形屏幕，方形表情图按圆屏安全区等比缩放居中显示，避免超出圆形可视区域或覆盖成黑底文字状态。固件启动时将状态 PNG 预解码到小画布，状态动画过程中只移动/缩放预解码画布，避免每帧重复解码 PNG。
 
 错误：
 
