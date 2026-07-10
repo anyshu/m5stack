@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1750";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1809";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -25,6 +25,8 @@ constexpr uint32_t kButtonDebounceMs = 20;
 constexpr uint32_t kAuthTimeoutMs = 10000;
 constexpr uint32_t kDisconnectRestartDelayMs = 100;
 constexpr uint32_t kMomentaryStatusMs = 2500;
+constexpr uint32_t kDisplayIdleDimMs = 60000;
+constexpr uint8_t kDisplayDimBrightness = 18;
 constexpr int kSampleRate = 16000;
 constexpr int kChannels = 1;
 constexpr int kFrameSamples = 320;  // 20ms frames — best quality
@@ -86,6 +88,9 @@ uint32_t audioBytesSent = 0;
 uint32_t micMissCount = 0;
 uint32_t lastAudioLogMs = 0;
 uint32_t lastAudioFrameMs = 0;
+uint32_t lastUserActivityMs = 0;
+uint8_t activeDisplayBrightness = 127;
+bool displayDimmed = false;
 
 int16_t pcmFrame[kFrameSamples];
 M5Canvas uiCanvas(&M5.Display);
@@ -135,6 +140,17 @@ bool readBluePressed() {
   return !m5gfx::gpio_in(GPIO_NUM_1);
 }
 
+void restoreDisplayBrightness() {
+  if (!displayDimmed) return;
+  M5.Display.setBrightness(activeDisplayBrightness);
+  displayDimmed = false;
+}
+
+void markUserActivity() {
+  lastUserActivityMs = millis();
+  restoreDisplayBrightness();
+}
+
 void clearReadyTimer() {
   returnReadyAtMs = 0;
 }
@@ -142,11 +158,13 @@ void clearReadyTimer() {
 void setStatus(const String& status) {
   statusLine = status;
   clearReadyTimer();
+  markUserActivity();
 }
 
 void showMomentaryStatus(const String& status, const uint32_t now) {
   statusLine = status;
   returnReadyAtMs = now + kMomentaryStatusMs;
+  markUserActivity();
 }
 
 String normalizeRemoteState(const String& state) {
@@ -645,6 +663,7 @@ void handleButtons() {
   const uint8_t rawBits = (yellowButton.rawPressed ? 0x01 : 0) | (blueButton.rawPressed ? 0x02 : 0);
   if (lastRawBits != rawBits) {
     lastRawBits = rawBits;
+    markUserActivity();
     Serial.printf("[button:raw] yellow=%d blue=%d m5A=%d m5B=%d pwr=%d\n",
                   yellowButton.rawPressed,
                   blueButton.rawPressed,
@@ -702,6 +721,14 @@ void tickMomentaryStatus() {
   }
 }
 
+void tickIdleBrightness() {
+  if (displayDimmed || recording) return;
+  if (lastUserActivityMs == 0) return;
+  if (millis() - lastUserActivityMs < kDisplayIdleDimMs) return;
+  M5.Display.setBrightness(kDisplayDimBrightness);
+  displayDimmed = true;
+}
+
 void tickAuthTimeout() {
   if (!connected || authenticated) return;
   if (connectedAtMs == 0) return;
@@ -747,6 +774,9 @@ void setup() {
   m5gfx::pinMode(GPIO_NUM_1, m5gfx::pin_mode_t::input_pullup);
   m5gfx::pinMode(GPIO_NUM_2, m5gfx::pin_mode_t::input_pullup);
   M5.Display.setRotation(0);
+  activeDisplayBrightness = M5.Display.getBrightness();
+  if (activeDisplayBrightness == 0) activeDisplayBrightness = 127;
+  markUserActivity();
   M5.Display.fillScreen(BLACK);
   uiCanvas.setColorDepth(16);
   uiCanvas.createSprite(M5.Display.width(), M5.Display.height());
@@ -780,6 +810,7 @@ void loop() {
   tickAuthTimeout();
   tickPendingRestart();
   tickMomentaryStatus();
+  tickIdleBrightness();
   tickBattery();
   tickAdvertisingWindow();
   drawUi();
