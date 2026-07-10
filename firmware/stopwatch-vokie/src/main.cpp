@@ -21,8 +21,8 @@ constexpr uint32_t kAuthTimeoutMs = 10000;
 constexpr uint32_t kDisconnectRestartDelayMs = 100;
 constexpr int kSampleRate = 16000;
 constexpr int kChannels = 1;
-constexpr int kFrameSamples = 160;  // 10ms frames
-constexpr int kFrameMs = 10;
+constexpr int kFrameSamples = 240;  // 15ms, 498 bytes < 509 MTU
+constexpr int kFrameMs = 15;
 constexpr int kAudioHeaderBytes = 18;
 constexpr size_t kMaxPcmBytes = kFrameSamples * sizeof(int16_t);  // 480 bytes
 
@@ -324,6 +324,12 @@ void pumpAudio() {
     memset(pcmFrame, 0, sizeof(pcmFrame));
   }
 
+  // Compensate for left-aligned I2S: shift samples left by 1 bit
+  for (int i = 0; i < kFrameSamples; ++i) {
+    int32_t val = static_cast<int32_t>(pcmFrame[i]) << 1;
+    pcmFrame[i] = static_cast<int16_t>(constrain(val, -32768L, 32767L));
+  }
+
   const int pcmBytes = kFrameSamples * static_cast<int>(sizeof(int16_t));
   sendAudioPacket(audioSeq == 1 ? 0x01 : 0x00, reinterpret_cast<const uint8_t*>(pcmFrame), pcmBytes);
 }
@@ -402,7 +408,7 @@ void setupBle() {
 
   const String config =
       String("{\"v\":1,\"device\":\"m5-stopwatch\",\"firmware\":\"") + kFirmwareVersion +
-      "\",\"audio\":{\"codec\":\"pcm16\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":10},"
+      "\",\"audio\":{\"codec\":\"pcm16\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":15},"
       "\"features\":[\"button\",\"battery\",\"display\",\"pcm_mic\"]}";
   configChar->setValue(config.c_str());
 
@@ -523,7 +529,7 @@ void setup() {
   M5.Speaker.end();
 
   auto micCfg = M5.Mic.config();
-  micCfg.magnification = 8;
+  micCfg.magnification = 4;  // Low: software left-shift provides 2x gain
   M5.Mic.config(micCfg);
 
   if (!M5.Mic.begin()) {
