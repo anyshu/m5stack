@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1657";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1750";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -150,7 +150,7 @@ void showMomentaryStatus(const String& status, const uint32_t now) {
 }
 
 String normalizeRemoteState(const String& state) {
-  if (state == "Transcribing" || state == "transcribing" || state == "ASR" || state == "asr") return "Ready";
+  if (state == "ASR" || state == "asr") return "Transcribing";
   if (state == "Done" || state == "done") return "Done";
   return state;
 }
@@ -323,6 +323,27 @@ void drawStatusImage(const StatusImage image, const uint8_t frame) {
                    datum_t::top_left);
 }
 
+
+void drawReadyPrompt(M5Canvas& canvas) {
+  static const String kRecordText = "Press to Rec";
+  static const String kSendText = "Click to Send";
+  constexpr int kSquareSize = 28;
+  constexpr int kGap = 16;
+  constexpr int kLineGap = 58;
+  const int textWidth = max(smoothTextWidth(kVokieSmoothPromptFont, kRecordText),
+                            smoothTextWidth(kVokieSmoothPromptFont, kSendText));
+  const int groupWidth = kSquareSize + kGap + textWidth;
+  const int x = (canvas.width() - groupWidth) / 2;
+  const int textX = x + kSquareSize + kGap;
+  const int firstY = canvas.height() / 2 - kLineGap / 2;
+  const int secondY = canvas.height() / 2 + kLineGap / 2;
+
+  canvas.fillRoundRect(x, firstY - kSquareSize / 2, kSquareSize, kSquareSize, 5, 0xffe0);
+  drawSmoothText(canvas, kVokieSmoothPromptFont, kRecordText, textX, firstY, WHITE);
+  canvas.fillRoundRect(x, secondY - kSquareSize / 2, kSquareSize, kSquareSize, 5, 0x04ff);
+  drawSmoothText(canvas, kVokieSmoothPromptFont, kSendText, textX, secondY, WHITE);
+}
+
 void drawUi(bool force = false) {
   const uint32_t now = millis();
   const StatusImage statusImage = statusImageForLine();
@@ -354,7 +375,11 @@ void drawUi(bool force = false) {
     drawStatusImage(statusImage, statusFrame);
   } else {
     uiCanvas.fillScreen(BLACK);
-    drawSmoothCenteredText(uiCanvas, kVokieSmoothStatusFont, status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 10, statusColor);
+    if (status == "READY") {
+      drawReadyPrompt(uiCanvas);
+    } else {
+      drawSmoothCenteredText(uiCanvas, kVokieSmoothStatusFont, status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 10, statusColor);
+    }
     drawSmoothCenteredText(uiCanvas, kVokieSmoothBatteryFont, batteryLine, uiCanvas.width() / 2, uiCanvas.height() - 42, WHITE);
   }
   uiCanvas.pushSprite(0, 0);
@@ -486,7 +511,7 @@ void stopRecording() {
   recording = false;
   notifyControl(controlButtonJson("yellow", "ptt_up"));
   sendAudioPacket(0x02, nullptr, 0);
-  setStatus("Ready");
+  setStatus("Transcribing");
   Serial.printf("[record] stop frames=%lu pcmBytes=%lu micMiss=%lu\n",
                 static_cast<unsigned long>(audioFrameCount),
                 static_cast<unsigned long>(audioBytesSent),
@@ -722,12 +747,7 @@ void setup() {
   m5gfx::pinMode(GPIO_NUM_1, m5gfx::pin_mode_t::input_pullup);
   m5gfx::pinMode(GPIO_NUM_2, m5gfx::pin_mode_t::input_pullup);
   M5.Display.setRotation(0);
-  M5.Display.setFont(&fonts::FreeSansBold24pt7b);
-  M5.Display.setTextDatum(middle_center);
-  M5.Display.setTextColor(WHITE, BLACK);
-  M5.Display.setTextSize(1.4f);
   M5.Display.fillScreen(BLACK);
-  M5.Display.drawString("BOOT", M5.Display.width() / 2, M5.Display.height() / 2);
   uiCanvas.setColorDepth(16);
   uiCanvas.createSprite(M5.Display.width(), M5.Display.height());
   uiCanvasReady = true;

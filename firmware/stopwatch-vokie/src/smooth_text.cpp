@@ -17,7 +17,7 @@ uint16_t blendOnBlack(const uint16_t color, const uint8_t alpha4) {
   return (r << 11) | (g << 5) | b;
 }
 
-int textWidth(const VokieSmoothFont& font, const String& text) {
+int textWidthInternal(const VokieSmoothFont& font, const String& text) {
   int width = 0;
   for (size_t i = 0; i < text.length(); ++i) {
     if (const VokieSmoothGlyph* glyph = findGlyph(font, text[i])) {
@@ -52,14 +52,34 @@ void drawGlyph(M5Canvas& canvas, const VokieSmoothGlyph& glyph, const int origin
 
 }  // namespace
 
+int smoothTextWidth(const VokieSmoothFont& font, const String& text) {
+  return textWidthInternal(font, text);
+}
+
+void drawSmoothText(M5Canvas& canvas,
+                    const VokieSmoothFont& font,
+                    const String& text,
+                    const int x,
+                    const int centerY,
+                    const uint16_t color) {
+  int cursorX = x;
+  const int baselineY = centerY - (font.ascent + font.descent) / 2 + font.ascent;
+  for (size_t i = 0; i < text.length(); ++i) {
+    const VokieSmoothGlyph* glyph = findGlyph(font, text[i]);
+    if (glyph == nullptr) glyph = findGlyph(font, ' ');
+    if (glyph == nullptr) continue;
+    drawGlyph(canvas, *glyph, cursorX, baselineY, color);
+    cursorX += glyph->xAdvance;
+  }
+}
+
 void drawSmoothCenteredText(M5Canvas& canvas,
                             const VokieSmoothFont& font,
                             String text,
                             const int centerX,
                             const int centerY,
                             const uint16_t color) {
-  text.toUpperCase();
-  const int width = textWidth(font, text);
+  const int width = textWidthInternal(font, text);
   int cursorX = centerX - width / 2;
   const int baselineY = centerY - (font.ascent + font.descent) / 2 + font.ascent;
   for (size_t i = 0; i < text.length(); ++i) {

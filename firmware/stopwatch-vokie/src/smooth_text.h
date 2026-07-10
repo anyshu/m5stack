@@ -11,3 +11,12 @@ void drawSmoothCenteredText(M5Canvas& canvas,
                             int centerX,
                             int centerY,
                             uint16_t color);
+
+int smoothTextWidth(const VokieSmoothFont& font, const String& text);
+
+void drawSmoothText(M5Canvas& canvas,
+                    const VokieSmoothFont& font,
+                    const String& text,
+                    int x,
+                    int centerY,
+                    uint16_t color);
