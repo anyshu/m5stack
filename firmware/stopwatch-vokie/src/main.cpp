@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1809";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260711.1912";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -91,6 +91,7 @@ uint32_t lastAudioFrameMs = 0;
 uint32_t lastUserActivityMs = 0;
 uint8_t activeDisplayBrightness = 127;
 bool displayDimmed = false;
+bool chineseUiEnabled = true;
 
 int16_t pcmFrame[kFrameSamples];
 M5Canvas uiCanvas(&M5.Display);
@@ -194,6 +195,31 @@ void updateButton(DebouncedButton& button, const bool rawPressed, const uint32_t
   }
 }
 
+int hexValue(const char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+void appendUtf8(String& out, const uint32_t codepoint) {
+  if (codepoint <= 0x7f) {
+    out += static_cast<char>(codepoint);
+  } else if (codepoint <= 0x7ff) {
+    out += static_cast<char>(0xc0 | (codepoint >> 6));
+    out += static_cast<char>(0x80 | (codepoint & 0x3f));
+  } else if (codepoint <= 0xffff) {
+    out += static_cast<char>(0xe0 | (codepoint >> 12));
+    out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
+    out += static_cast<char>(0x80 | (codepoint & 0x3f));
+  } else {
+    out += static_cast<char>(0xf0 | (codepoint >> 18));
+    out += static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f));
+    out += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
+    out += static_cast<char>(0x80 | (codepoint & 0x3f));
+  }
+}
+
 String extractJsonString(const String& json, const char* key) {
   const String marker = String("\"") + key + "\":";
   int start = json.indexOf(marker);
@@ -203,18 +229,35 @@ String extractJsonString(const String& json, const char* key) {
   if (start >= static_cast<int>(json.length()) || json[start] != '"') return "";
   start++;
   String out;
-  bool escaped = false;
   for (int i = start; i < static_cast<int>(json.length()); ++i) {
     const char c = json[i];
-    if (escaped) {
+    if (c == '"') break;
+    if (c != '\\') {
       out += c;
-      escaped = false;
-    } else if (c == '\\') {
-      escaped = true;
-    } else if (c == '"') {
-      break;
+      continue;
+    }
+    if (++i >= static_cast<int>(json.length())) break;
+    const char escaped = json[i];
+    if (escaped == 'n') out += '\n';
+    else if (escaped == 'r') out += '\r';
+    else if (escaped == 't') out += '\t';
+    else if (escaped == 'u' && i + 4 < static_cast<int>(json.length())) {
+      uint32_t codepoint = 0;
+      bool valid = true;
+      for (int j = 0; j < 4; ++j) {
+        const int v = hexValue(json[i + 1 + j]);
+        if (v < 0) {
+          valid = false;
+          break;
+        }
+        codepoint = (codepoint << 4) | static_cast<uint32_t>(v);
+      }
+      if (valid) {
+        appendUtf8(out, codepoint);
+        i += 4;
+      }
     } else {
-      out += c;
+      out += escaped;
     }
   }
   return out;
@@ -283,6 +326,9 @@ uint8_t statusAnimationFrame(const StatusImage image, const uint32_t now) {
   return static_cast<uint8_t>((now / kFrameMs) % kFrameCount);
 }
 
+void drawChineseCentered(M5Canvas& canvas, const String& text, int centerY, uint16_t color, const lgfx::IFont* font, float size = 1.0f);
+void drawFinalTextPreview(M5Canvas& canvas);
+
 void initStatusImageCanvases() {
   thinkingImageCanvas.setColorDepth(16);
   okImageCanvas.setColorDepth(16);
@@ -326,6 +372,10 @@ void drawStatusImage(const StatusImage image, const uint8_t frame) {
                                 0.0f,
                                 scale,
                                 scale);
+    if (chineseUiEnabled) {
+      drawChineseCentered(uiCanvas, image == StatusImage::transcribing ? "转写中" : "完成", 72, BLACK, &fonts::efontCN_24_b, 1.5f);
+      if (image == StatusImage::done) drawFinalTextPreview(uiCanvas);
+    }
     return;
   }
 
@@ -339,6 +389,89 @@ void drawStatusImage(const StatusImage image, const uint8_t frame) {
                    scale,
                    scale,
                    datum_t::top_left);
+  if (chineseUiEnabled) {
+    drawChineseCentered(uiCanvas, image == StatusImage::transcribing ? "转写中" : "完成", 72, BLACK, &fonts::efontCN_24_b, 1.5f);
+    if (image == StatusImage::done) drawFinalTextPreview(uiCanvas);
+  }
+}
+
+
+String chineseStatusText(const String& status) {
+  if (status == "REC") return "录音中";
+  if (status == "PAIR") return "配对中";
+  if (status == "BLE") return "已连接";
+  if (status == "OK") return "已认证";
+  if (status == "DISC") return "已断开";
+  if (status == "NO BLE") return "未连接";
+  if (status == "TRANS") return "转写中";
+  if (status == "DONE") return "完成";
+  if (status == "READY") return "准备好了";
+  if (status == "IDLE") return "空闲";
+  if (status == "SEND" || status == "Send") return "发送";
+  if (status == "UNDO" || status == "Undo") return "撤销";
+  return status;
+}
+
+String truncateUtf8(const String& text, const uint8_t maxCodepoints) {
+  String out;
+  uint8_t count = 0;
+  for (int i = 0; i < static_cast<int>(text.length()) && count < maxCodepoints;) {
+    const uint8_t c = static_cast<uint8_t>(text[i]);
+    int len = 1;
+    if ((c & 0xe0) == 0xc0) len = 2;
+    else if ((c & 0xf0) == 0xe0) len = 3;
+    else if ((c & 0xf8) == 0xf0) len = 4;
+    if (i + len > static_cast<int>(text.length())) break;
+    for (int j = 0; j < len; ++j) out += text[i + j];
+    i += len;
+    count++;
+  }
+  if (static_cast<int>(out.length()) < static_cast<int>(text.length())) out += "...";
+  return out;
+}
+
+void drawChineseCentered(M5Canvas& canvas, const String& text, const int centerY, const uint16_t color, const lgfx::IFont* font, const float size) {
+  canvas.setFont(font);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextSize(size);
+  canvas.setTextColor(color);
+  canvas.drawString(text, canvas.width() / 2, centerY);
+  canvas.setTextSize(1.0f);
+}
+
+void drawChineseReadyPrompt(M5Canvas& canvas) {
+  static const String kRecordText = "按住说话";
+  static const String kSendText = "点击发送";
+  constexpr int kSquareSize = 34;
+  constexpr int kGap = 18;
+  constexpr int kLineGap = 82;
+  canvas.setFont(&fonts::efontCN_24_b);
+  canvas.setTextSize(1.7f);
+  const int textWidth = max(canvas.textWidth(kRecordText), canvas.textWidth(kSendText));
+  const int groupWidth = kSquareSize + kGap + textWidth;
+  const int x = (canvas.width() - groupWidth) / 2;
+  const int textX = x + kSquareSize + kGap;
+  const int firstY = canvas.height() / 2 - kLineGap / 2;
+  const int secondY = canvas.height() / 2 + kLineGap / 2;
+
+  canvas.fillRoundRect(x, firstY - kSquareSize / 2, kSquareSize, kSquareSize, 5, 0xffe0);
+  canvas.setTextDatum(middle_left);
+  canvas.setTextColor(WHITE);
+  canvas.drawString(kRecordText, textX, firstY);
+  canvas.fillRoundRect(x, secondY - kSquareSize / 2, kSquareSize, kSquareSize, 5, 0x04ff);
+  canvas.drawString(kSendText, textX, secondY);
+  canvas.setTextSize(1.0f);
+}
+
+void drawFinalTextPreview(M5Canvas& canvas) {
+  if (finalText.length() == 0) return;
+  const String preview = truncateUtf8(finalText, 18);
+  canvas.setFont(&fonts::efontCN_16_b);
+  canvas.setTextSize(1.0f);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextColor(BLACK, WHITE);
+  canvas.fillRoundRect(48, canvas.height() - 88, canvas.width() - 96, 44, 18, WHITE);
+  canvas.drawString(preview, canvas.width() / 2, canvas.height() - 66);
 }
 
 
@@ -387,14 +520,19 @@ void drawUi(bool force = false) {
 
   if (!uiCanvasReady) return;
 
-  // Draw into an offscreen canvas and push the complete frame once to avoid
-  // visible black-frame flicker from clearing the physical display directly.
   if (statusImage != StatusImage::none) {
+    // Sticker states still use predecoded M5GFX sprites because the artwork is
+    // already optimized for the round AMOLED safe area.
     drawStatusImage(statusImage, statusFrame);
   } else {
+    // Draw into an offscreen canvas and push the complete frame once to avoid
+    // visible black-frame flicker from clearing the physical display directly.
     uiCanvas.fillScreen(BLACK);
     if (status == "READY") {
-      drawReadyPrompt(uiCanvas);
+      if (chineseUiEnabled) drawChineseReadyPrompt(uiCanvas);
+      else drawReadyPrompt(uiCanvas);
+    } else if (chineseUiEnabled) {
+      drawChineseCentered(uiCanvas, chineseStatusText(status), uiCanvas.height() / 2 - 8, statusColor, &fonts::efontCN_24_b, 2.0f);
     } else {
       drawSmoothCenteredText(uiCanvas, kVokieSmoothStatusFont, status, uiCanvas.width() / 2, uiCanvas.height() / 2 - 10, statusColor);
     }
@@ -733,7 +871,7 @@ void tickAuthTimeout() {
   if (!connected || authenticated) return;
   if (connectedAtMs == 0) return;
   if (millis() - connectedAtMs < kAuthTimeoutMs) return;
-  Serial.printf("[ble] auth timeout at %lums – disconnecting\n",
+  Serial.printf("[ble] auth timeout at %lums - disconnecting\n",
                 static_cast<unsigned long>(millis()));
   forceDisconnectAndRestart();
 }
