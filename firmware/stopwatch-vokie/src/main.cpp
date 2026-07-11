@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260710.1809";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260711.1830";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -387,11 +387,13 @@ void drawUi(bool force = false) {
 
   if (!uiCanvasReady) return;
 
-  // Draw into an offscreen canvas and push the complete frame once to avoid
-  // visible black-frame flicker from clearing the physical display directly.
   if (statusImage != StatusImage::none) {
+    // Sticker states still use predecoded M5GFX sprites because the artwork is
+    // already optimized for the round AMOLED safe area.
     drawStatusImage(statusImage, statusFrame);
   } else {
+    // Draw into an offscreen canvas and push the complete frame once to avoid
+    // visible black-frame flicker from clearing the physical display directly.
     uiCanvas.fillScreen(BLACK);
     if (status == "READY") {
       drawReadyPrompt(uiCanvas);
@@ -733,7 +735,7 @@ void tickAuthTimeout() {
   if (!connected || authenticated) return;
   if (connectedAtMs == 0) return;
   if (millis() - connectedAtMs < kAuthTimeoutMs) return;
-  Serial.printf("[ble] auth timeout at %lums – disconnecting\n",
+  Serial.printf("[ble] auth timeout at %lums - disconnecting\n",
                 static_cast<unsigned long>(millis()));
   forceDisconnectAndRestart();
 }

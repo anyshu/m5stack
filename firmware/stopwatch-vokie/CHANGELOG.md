@@ -1,3 +1,58 @@
+# 固件版本追踪
+
+## 0.2.1-test.20260711.1830 - 2026-07-11 18:30
+
+- 记录类型：测试版本。
+- 修改内容：修复撤回 LVGL 后 `Transcribing` 和 `Done`/`OK` sticker 状态不刷新的问题；回滚时 `uiCanvas.pushSprite(0, 0)` 被误放进普通文字分支，导致表情图只画到离屏 canvas 没有推送到 AMOLED，本版恢复所有 UI 分支绘制后统一 push；更新固件版本号为 `0.2.1-test.20260711.1830`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1830`、NimBLE 启动和 BLE 广播正常，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`；用户确认当前版本正常，录音结束后的 `Transcribing` 和 `Done`/`OK` sticker 显示已恢复。当前确认为可用版本。
+- 对应 commit：本次提交。
+
+## 0.2.1-test.20260711.1825 - 2026-07-11 18:25（问题版本）
+
+- 记录类型：测试版本。
+- 修改内容：撤回 LVGL 主固件构建，恢复 M5GFX/M5Canvas 稳定渲染路径；移除 `platformio.ini` 中 LVGL 依赖和构建参数，主流程不再初始化 LVGL，也移除上一版认证 fallback 试验；LVGL 试验代码移到 `firmware/stopwatch-vokie/experiments/lvgl/` 仅作后续参考；更新固件版本号为 `0.2.1-test.20260711.1825`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1825`、NimBLE 启动和 BLE 广播正常，日志中无 LVGL、无 `Guru Meditation` 或 `BLE_INIT: Malloc failed`。
+- 问题结论：用户反馈该版本录音完成后的 `Transcribing` 和 `Done`/`OK` sticker 显示异常；根因为 `pushSprite(0, 0)` 被误放在普通文字分支，表情图只更新离屏 canvas 未推送到屏幕。已由 `0.2.1-test.20260711.1830` 修复。
+- 对应 commit：本次提交。
+
+## 0.2.1-test.20260711.1813 - 2026-07-11 18:13（问题版本）
+
+- 记录类型：测试版本。
+- 修改内容：修复连接后停在 `BLE` 不进入 `Ready` 的问题；新增 BLE 连接后 1.5 秒认证兼容 fallback，若 Vokie 未写入 Auth characteristic 则自动进入 `Ready`，避免卡在已连接未认证状态；LVGL 初始化改为主循环懒加载，避免在 BLE callback 中初始化 UI；更新固件版本号为 `0.2.1-test.20260711.1813`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1813`、NimBLE 启动和 BLE 广播正常，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`；认证 fallback 待 Vokie 实际连接后触发验证。
+- 问题结论：用户反馈连接后仍停在 `BLE`，认证 fallback 未解决实际连接状态推进问题；不作为可用版本。
+- 对应 commit：本次提交。
+
+## 0.2.1-test.20260711.1802 - 2026-07-11 18:02（问题版本）
+
+- 记录类型：测试版本。
+- 修改内容：修复进入 Pair 后疑似卡死/无法继续配对的问题；LVGL 不再在启动阶段初始化，配对和认证阶段继续使用原 M5Canvas 轻量界面，只有 BLE 已连接且认证成功后才懒加载 LVGL 主界面，避免 LVGL 占用影响 BLE 连接阶段；更新固件版本号为 `0.2.1-test.20260711.1802`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1802`、NimBLE 启动和 BLE 广播正常，Pair 阶段未初始化 LVGL，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`。待用户确认 Vokie 连接和认证后 LVGL 主界面效果。
+- 问题结论：用户反馈连接后显示 `BLE` 并卡住；不作为可用版本。
+- 对应 commit：本次提交。
+
+## 0.2.1-test.20260711.1753 - 2026-07-11 17:53（问题版本）
+
+- 记录类型：测试版本。
+- 修改内容：修复上一版 LVGL 测试固件持续重启问题；根据串口日志 `BLE_INIT: Malloc failed`，将 BLE 初始化提前到 LVGL 初始化之前，并将 LVGL draw buffer 从 40 行降到 24 行、LVGL 内部堆限制为 16KB，降低内部内存占用；更新固件版本号为 `0.2.1-test.20260711.1753`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；烧录后连续监听串口 12 秒，未出现 `Guru Meditation`、`BLE_INIT: Malloc failed` 或重启标记。待用户目视确认 LVGL 界面效果。
+- 问题结论：用户反馈进入 Pair 后疑似卡死；不作为可用版本。
+- 对应 commit：本次提交。
+
+## 0.2.1-test.20260711.1742 - 2026-07-11 17:42（问题版本）
+
+- 记录类型：测试版本。
+- 修改内容：引入 LVGL 8.4 主界面渲染层，新增独立 `ui_lvgl` 模块和 M5GFX flush 对接；普通状态页改为渐变背景、圆形光晕、状态卡片、彩色进度弧、按键提示胶囊和电量条，`Transcribing` / `Done` 的 sticker 风格继续复用已优化的表情图动效；更新固件版本号为 `0.2.1-test.20260711.1742`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已通过 `pio run -d firmware/stopwatch-vokie -t upload --upload-port /dev/cu.usbmodem101` 完成真机烧录；待目视确认 LVGL 色彩、布局和刷新性能。
+- 问题结论：用户反馈持续重启；串口曾出现 `BLE_INIT: Malloc failed` 和看门狗重启；不作为可用版本。
+- 对应 commit：本次提交。
+
 # Stopwatch Vokie Firmware Changelog
 
 ## 0.2.1-test.20260710.1809 - 2026-07-10 18:09
