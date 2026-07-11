@@ -1,5 +1,37 @@
 # 固件版本追踪
 
+## 0.2.1-test.20260711.1912 - 2026-07-11 19:12
+
+- 记录类型：测试版本。
+- 修改内容：修正蓝键单击后的短暂 `Send` 状态仍显示英文的问题，中文状态映射补充 `Send`/`Undo` 大小写兼容，显示为 `发送`/`撤销`；更新固件版本号为 `0.2.1-test.20260711.1912`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1912`、NimBLE 启动和 BLE 广播正常，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`；待用户目视确认蓝键单击后的短暂提示是否已从 `Send` 改为 `发送`。
+- 对应 commit：待提交。
+
+## 0.2.1-test.20260711.1905 - 2026-07-11 19:05
+
+- 记录类型：测试版本。
+- 修改内容：放大中文 UI 字号测试，状态文案使用 `efontCN_24_b` 的 2 倍缩放，Ready 功能提示使用约 1.7 倍缩放，Transcribing/Done sticker 顶部中文提示使用约 1.5 倍缩放，以接近原英文大字的视觉重量；更新固件版本号为 `0.2.1-test.20260711.1905`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1905`、NimBLE 启动和 BLE 广播正常，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`；待用户目视确认放大后的中文字号和观感。
+- 对应 commit：待提交。
+
+## 0.2.1-test.20260711.1855 - 2026-07-11 18:55
+
+- 记录类型：测试版本。
+- 修改内容：调整中文 Ready 页面按键提示文案，移除不准确的 `黄键` / `蓝键` 字样，仅保留功能提示 `按住说话` 和 `点击发送`，色块仍作为操作提示的视觉引导；更新固件版本号为 `0.2.1-test.20260711.1855`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1855`、NimBLE 启动和 BLE 广播正常，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`；待用户目视确认 Ready 中文功能提示是否合适。
+- 对应 commit：待提交。
+
+## 0.2.1-test.20260711.1845 - 2026-07-11 18:45
+
+- 记录类型：测试版本。
+- 修改内容：基于稳定版本 `0.2.1-test.20260711.1830` 新增中文渲染测试，不引入 LVGL；使用 M5GFX 自带 `efontCN_16_b` / `efontCN_24_b` 渲染中文状态、Ready 页面中文按键提示、Transcribing/Done sticker 页中文提示，并在 `Done` 时回显 `final_text` 前 18 个 UTF-8 字符；`extractJsonString` 增加 `\uXXXX` 解码，兼容被转义的中文 JSON 字符串；更新固件版本号为 `0.2.1-test.20260711.1845`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；M5GFX 中文 efont 引入后 Flash 使用率从稳定版约 67.1% 增至约 80.6%；软复位后串口确认固件版本 `0.2.1-test.20260711.1845`、NimBLE 启动和 BLE 广播正常，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`；待用户目视确认中文显示、final_text 回显和 BLE/录音链路。
+- 对应 commit：待提交。
+
 ## 0.2.1-test.20260711.1830 - 2026-07-11 18:30
 
 - 记录类型：测试版本。
