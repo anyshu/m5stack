@@ -1,5 +1,13 @@
 # 固件版本追踪
 
+## 0.2.1-test.20260711.1939 - 2026-07-11 19:39
+
+- 记录类型：测试版本。
+- 修改内容：新增屏幕触摸唤醒逻辑，M5Unified 检测到触摸点且屏幕已调暗时立即恢复正常亮度；触摸事件也会刷新空闲计时，避免触摸期间继续触发调暗；BLE Config features 增加 `touch_wake`；更新固件版本号为 `0.2.1-test.20260711.1939`。
+- 烧录状态：已烧录到 `/dev/cu.usbmodem101`。
+- 测试结论：已通过 `pio run -d firmware/stopwatch-vokie` 编译验证，并已完成真机烧录；软复位后串口确认固件版本 `0.2.1-test.20260711.1939`、M5GFX 识别为 `board_M5StopWatch`、NimBLE 启动和 BLE 广播正常，未出现 `Guru Meditation` 或 `BLE_INIT: Malloc failed`；待用户目视确认调暗后点击 AMOLED 能否唤醒亮屏。
+- 对应 commit：本次提交。
+
 ## 0.2.1-test.20260711.1912 - 2026-07-11 19:12
 
 - 记录类型：测试版本。

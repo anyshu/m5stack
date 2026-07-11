@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260711.1912";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260711.1939";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -782,7 +782,7 @@ void setupBle() {
       String("{\"v\":1,\"device\":\"m5-stopwatch\",\"firmware\":\"") + kFirmwareVersion +
       "\",\"audio\":{\"codec\":\"adpcm\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":20},"
       "\"display\":{\"styles\":[\"text\",\"sticker\"],\"defaultStyle\":\"sticker\"},"
-      "\"features\":[\"button\",\"battery\",\"display\",\"display_style\",\"pcm_mic\"]}";
+      "\"features\":[\"button\",\"battery\",\"display\",\"display_style\",\"touch_wake\",\"pcm_mic\"]}";
   configChar->setValue(config.c_str());
 
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
@@ -790,6 +790,29 @@ void setupBle() {
   adv->addServiceUUID(kServiceUuid);
   adv->enableScanResponse(true);
   startAdvertisingWindow();
+}
+
+void handleTouchWake() {
+  if (!M5.Touch.isEnabled()) return;
+
+  const uint8_t touchCount = M5.Touch.getCount();
+  if (touchCount == 0) return;
+
+  bool touchActivity = false;
+  for (uint8_t i = 0; i < touchCount; ++i) {
+    const auto& touch = M5.Touch.getDetail(i);
+    touchActivity = touchActivity || touch.wasPressed() || touch.wasClicked() || touch.wasReleased();
+    if (displayDimmed && touch.isPressed()) {
+      Serial.printf("[touch] wake display x=%d y=%d\n", touch.x, touch.y);
+      markUserActivity();
+      drawUi(true);
+      return;
+    }
+  }
+
+  if (touchActivity) {
+    markUserActivity();
+  }
 }
 
 void handleButtons() {
@@ -943,6 +966,7 @@ void setup() {
 
 void loop() {
   M5.update();
+  handleTouchWake();
   handleButtons();
   pumpAudio();
   tickAuthTimeout();
