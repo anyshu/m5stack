@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr const char* kFirmwareVersion = "0.2.1-test.20260711.1939";
+constexpr const char* kFirmwareVersion = "0.2.1-test.20260711.2038";
 constexpr const char* kDeviceName = "Vokie SW";
 
 constexpr const char* kServiceUuid = "7b5a0000-766f-6b69-652d-73746f707731";
@@ -26,6 +26,7 @@ constexpr uint32_t kAuthTimeoutMs = 10000;
 constexpr uint32_t kDisconnectRestartDelayMs = 100;
 constexpr uint32_t kMomentaryStatusMs = 2500;
 constexpr uint32_t kDisplayIdleDimMs = 60000;
+constexpr uint32_t kDisplayIdlePowerOffMs = 5 * 60 * 1000;
 constexpr uint8_t kDisplayDimBrightness = 18;
 constexpr int kSampleRate = 16000;
 constexpr int kChannels = 1;
@@ -91,6 +92,7 @@ uint32_t lastAudioFrameMs = 0;
 uint32_t lastUserActivityMs = 0;
 uint8_t activeDisplayBrightness = 127;
 bool displayDimmed = false;
+bool idlePowerOffRequested = false;
 bool chineseUiEnabled = true;
 
 int16_t pcmFrame[kFrameSamples];
@@ -782,7 +784,7 @@ void setupBle() {
       String("{\"v\":1,\"device\":\"m5-stopwatch\",\"firmware\":\"") + kFirmwareVersion +
       "\",\"audio\":{\"codec\":\"adpcm\",\"sampleRate\":16000,\"channels\":1,\"frameMs\":20},"
       "\"display\":{\"styles\":[\"text\",\"sticker\"],\"defaultStyle\":\"sticker\"},"
-      "\"features\":[\"button\",\"battery\",\"display\",\"display_style\",\"touch_wake\",\"pcm_mic\"]}";
+      "\"features\":[\"button\",\"battery\",\"display\",\"display_style\",\"touch_wake\",\"idle_power_off\",\"pcm_mic\"]}";
   configChar->setValue(config.c_str());
 
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
@@ -890,6 +892,24 @@ void tickIdleBrightness() {
   displayDimmed = true;
 }
 
+void enterIdlePowerOff() {
+  idlePowerOffRequested = true;
+  Serial.printf("[power] idle %lums -> power off\n",
+                static_cast<unsigned long>(millis() - lastUserActivityMs));
+  statusLine = "Power off";
+  drawUi(true);
+  delay(120);
+  M5.Mic.end();
+  M5.Power.powerOff();
+}
+
+void tickIdlePowerOff() {
+  if (idlePowerOffRequested || recording) return;
+  if (lastUserActivityMs == 0) return;
+  if (millis() - lastUserActivityMs < kDisplayIdlePowerOffMs) return;
+  enterIdlePowerOff();
+}
+
 void tickAuthTimeout() {
   if (!connected || authenticated) return;
   if (connectedAtMs == 0) return;
@@ -973,6 +993,7 @@ void loop() {
   tickPendingRestart();
   tickMomentaryStatus();
   tickIdleBrightness();
+  tickIdlePowerOff();
   tickBattery();
   tickAdvertisingWindow();
   drawUi();
